@@ -1,0 +1,44 @@
+my usage:
+
+./3700crawler hughes.ca 001081764
+
+notes:
+
+must wrap in tls socket right off the bat [DONE]
+
+must use 1.1, which supports chunked responses
+	can implement in 1.0, check works, then switch to 1.1
+
+GET for getting html pages
+POST for login
+	result of the POST will have a cookie, which need to store and submit along with each next GET
+
+Certain Headers u must have in ur reqs’
+encouraged : Connection: Keep Alive
+	but hard to do. start without it
+encouraged: Accept-Encoding: gzip
+
+
+possible status’ to handle
+200 — all good
+302 — redirect. req again using the URL given in Location header
+403/404 — forbidden and not found. abandon the url u req for
+503 — service unavailable. may randomly return this to us, in which case we just retry the req until it works
+
+Storing urls — “the frontier”
+As u crawl ull observe many URLS. need to store them somehow so u know what u have to visit. 
+	stack, queue, or list
+
+Obviously, also want to store where we’ve been to avoid revisits
+
+Only crawl fakebook domains… check every url u crawl before doing it that its the right domain
+
+For logging in, youll need to reverse engineer the HTML on the log in page
+
+Look for CSRF for some reason
+
+
+
+
+
+
