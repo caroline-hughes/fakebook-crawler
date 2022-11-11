@@ -2,30 +2,120 @@
 
 import argparse
 import socket, ssl
+from html.parser import HTMLParser
+import xml.etree.ElementTree as ET
 
 DEFAULT_SERVER = "proj5.3700.network"
 DEFAULT_PORT = 443
+USERNAME = "hughes.ca"
+PASSWORD = "001081764"
 
+def my_recv(s: socket):
+    buffer = ''
+    try:
+        while "</html>" not in buffer: 
+            data = s.recv(1024).decode('ascii')
+            if not data:
+                break
+            buffer += data
+    except Exception as loopException:
+        print("Exception occurred in loop:", loopException)
+    return buffer
+    
+class Parser(HTMLParser):
+    links_found = []
+    # attrs is a list of tuples
+    def handle_starttag(self, tag, attrs):
+        # if (tag == 'a'):
+        #     #print("a")
+        #     for attr in attrs:
+        #         href = attr[1]
+        #         if href[0] == '/' and href not in Crawler.links_crawled:   # we only care about crawling links in this domain... should be a path within it
+        #             self.links_found.append(attr[1])
+        if (tag == 'input'):
+            if ('name', 'csrfmiddlewaretoken') in attrs:
+                for tuple in attrs:
+                    if tuple[0] == 'value':
+                        Crawler.csrfmiddlewaretoken = tuple[1]
+                            
 class Crawler:
+    sock = None
+    parser = None
+    csrfmiddlewaretoken = None
+    csrftoken = None
+    sessionid = None
+
+    links_crawled = ['/']
+
     def __init__(self, args):
         self.server = args.server
         self.port = args.port
         self.username = args.username
         self.password = args.password
 
-    def run(self):
-        request = "GET / HTTP/1.0\r\n\r\n"
+    def send_req(self, request):
+        # print("Request to %s:%d was:\n\n" % (self.server, self.port))
+        print('MAKING REQ: %s\n\n' % request)
+        self.sock.send(request.encode('ascii'))
+        return self.get_response()
+        
+    def get_response(self):
+        try:
+            res = my_recv(self.sock)
+            print("res:\n%s" % res)
+            self.parser.feed(res)
+            self.parser.close()
+            return res
+        except:
+            print('could not my_recv')
 
-        print("Request to %s:%d" % (self.server, self.port))
-        print(request)
+        # print('links found:')
+        # print(Parser.links_found)
+
+    def login_POST(self):
+        if (self.sessionid is None or self.csrftoken is None or self.csrfmiddlewaretoken is None):
+            print('not POSTing, missing necessary login data')
+
+        initial = "POST /accounts/login/?next=/fakebook/ HTTP/1.0"
+        body = "username=%s&password=%s&csrfmiddlewaretoken=%s" % (USERNAME, PASSWORD, self.csrfmiddlewaretoken)
+
+        # headers
+        c_length = "Content-Length: %d" % len(body)
+        print('my c_length: ', c_length)
+        c_type = "Content-Type: application/x-www-form-urlencoded"
+        keepalive = "Connection: close"
+        cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
+        print('my cookie: ', cookie)
+
+        return initial + "\r\n" + cookie + "\r\n" + c_length + "\r\n" + c_type + "\r\n" + keepalive + "\r\n\r\n" + body + "\r\n\r\n"
+
+    def perform_login(self):
+        # 1. GET /accounts/login/, for cookie data
+        res = self.send_req("GET /accounts/login/ HTTP/1.0\r\n" + "Connection: keep-alive\r\n\r\n")
+
+        # TODO: better way than .index
+        sid_i = res.index("sessionid=") + 10
+        self.sessionid = res[sid_i:sid_i + 32] # len(sessionid) = 32
+
+        tok_i = res.index("csrftoken=")+ 10
+        self.csrftoken = res[tok_i:tok_i + 64] # len(sessionid) = 64
+
+        # 2. POST /accounts/login/, for actual login
+        self.send_req(self.login_POST())
+
+
+    def run(self):
+        # instantiate socket with tls for HTTPS
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         contextInstance = ssl.SSLContext()
-        sock = contextInstance.wrap_socket(s)
-        sock.connect((self.server, self.port))
-        sock.send(request.encode('ascii'))
+        self.sock = contextInstance.wrap_socket(s)
+        self.sock.connect((self.server, self.port))
+        self.parser = Parser()
 
-        data = sock.recv(1000)
-        print("Response:\n%s" % data.decode('ascii'))
+        self.perform_login()
+
+        self.sock.close()
+       
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='crawl Fakebook')
