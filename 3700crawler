@@ -23,15 +23,18 @@ def my_recv(s: socket):
     return buffer
     
 class Parser(HTMLParser):
-    links_found = []
+    # record of paths weve discovered
+    links_found = ['/'] 
+
     # attrs is a list of tuples
     def handle_starttag(self, tag, attrs):
-        # if (tag == 'a'):
-        #     #print("a")
-        #     for attr in attrs:
-        #         href = attr[1]
-        #         if href[0] == '/' and href not in Crawler.links_crawled:   # we only care about crawling links in this domain... should be a path within it
-        #             self.links_found.append(attr[1])
+        # a tags provide the next paths to crawl
+        if (tag == 'a'):
+            for tuple in attrs:
+                href = tuple[1]
+                if href[0] == '/' and href not in Crawler.links_crawled:   # we only care about crawling links in this domain... should be a path within it
+                    self.links_found.append(tuple[1])
+        # right now, we only care about the input tags for the csrfmiddlewaretoken on login page
         if (tag == 'input'):
             if ('name', 'csrfmiddlewaretoken') in attrs:
                 for tuple in attrs:
@@ -45,6 +48,7 @@ class Crawler:
     csrftoken = None
     sessionid = None
 
+    # record of paths weve crawled (had successful GET request for)
     links_crawled = ['/']
 
     def __init__(self, args):
@@ -55,43 +59,41 @@ class Crawler:
 
     def send_req(self, request):
         # print("Request to %s:%d was:\n\n" % (self.server, self.port))
-        print('MAKING REQ: %s\n\n' % request)
+        print('\n\nMAKING REQ:\n%s' % request)
         self.sock.send(request.encode('ascii'))
         return self.get_response()
         
     def get_response(self):
         try:
             res = my_recv(self.sock)
-            print("res:\n%s" % res)
+            print("RESPONSE:\n%s" % res)
             self.parser.feed(res)
             self.parser.close()
             return res
         except:
             print('could not my_recv')
 
-        # print('links found:')
-        # print(Parser.links_found)
-
     def login_POST(self):
         if (self.sessionid is None or self.csrftoken is None or self.csrfmiddlewaretoken is None):
             print('not POSTing, missing necessary login data')
 
         initial = "POST /accounts/login/?next=/fakebook/ HTTP/1.0"
-        body = "username=%s&password=%s&csrfmiddlewaretoken=%s" % (USERNAME, PASSWORD, self.csrfmiddlewaretoken)
+        body = "username=%s&password=%s&csrfmiddlewaretoken=%s&next=/fakebook/" % (USERNAME, PASSWORD, self.csrfmiddlewaretoken)
 
         # headers
         c_length = "Content-Length: %d" % len(body)
-        print('my c_length: ', c_length)
+        #print('my c_length: ', c_length)
         c_type = "Content-Type: application/x-www-form-urlencoded"
         keepalive = "Connection: close"
         cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
-        print('my cookie: ', cookie)
+        #print('my cookie: ', cookie)
 
         return initial + "\r\n" + cookie + "\r\n" + c_length + "\r\n" + c_type + "\r\n" + keepalive + "\r\n\r\n" + body + "\r\n\r\n"
 
     def perform_login(self):
         # 1. GET /accounts/login/, for cookie data
-        res = self.send_req("GET /accounts/login/ HTTP/1.0\r\n" + "Connection: keep-alive\r\n\r\n")
+        res = self.send_req("GET /accounts/login/ HTTP/1.0\r\nConnection: keep-alive\r\n\r\n")
+        self.links_crawled.append('/accounts/login/')
 
         # TODO: better way than .index
         sid_i = res.index("sessionid=") + 10
@@ -103,6 +105,12 @@ class Crawler:
         # 2. POST /accounts/login/, for actual login
         self.send_req(self.login_POST())
 
+    def fakebook_GET(self):
+        initial = "GET /fakebook/ HTTP/1.0"
+        keepalive = "Connection: close"
+        cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
+
+        return  initial + "\r\n" + cookie + "\r\n" + keepalive + "\r\n\r\n"
 
     def run(self):
         # instantiate socket with tls for HTTPS
@@ -114,6 +122,16 @@ class Crawler:
 
         self.perform_login()
 
+        # print('paths found:')
+        # print(Parser.links_found)
+
+        # print('paths crawled:')
+        # print(self.links_crawled)
+
+        # try to get /fakebook now that im logged in...
+        #print("\n\n\n\n GETTING FB")
+        #self.send_req(self.fakebook_GET())
+        
         self.sock.close()
        
 
