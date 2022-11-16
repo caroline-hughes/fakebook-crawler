@@ -10,6 +10,8 @@ DEFAULT_PORT = 443
 USERNAME = "hughes.ca"
 PASSWORD = "001081764"
 
+# kosowski.e 001360844
+
 def my_recv(s: socket):
     buffer = ''
     try:
@@ -78,7 +80,7 @@ class Crawler:
             print('not POSTing, missing necessary login data')
 
         initial = "POST /accounts/login/?next=/fakebook/ HTTP/1.0"
-        body = "username=%s&password=%s&csrfmiddlewaretoken=%s&next=/fakebook/" % (USERNAME, PASSWORD, self.csrfmiddlewaretoken)
+        body = "username=%s&password=%s&csrfmiddlewaretoken=%s&next=/fakebook/" % (self.username, self.password, self.csrfmiddlewaretoken)
 
         # headers
         c_length = "Content-Length: %d" % len(body)
@@ -95,6 +97,7 @@ class Crawler:
         res = self.send_req("GET /accounts/login/ HTTP/1.0\r\nConnection: keep-alive\r\n\r\n")
         self.links_crawled.append('/accounts/login/')
 
+
         # TODO: better way than .index
         sid_i = res.index("sessionid=") + 10
         self.sessionid = res[sid_i:sid_i + 32] # len(sessionid) = 32
@@ -103,7 +106,71 @@ class Crawler:
         self.csrftoken = res[tok_i:tok_i + 64] # len(sessionid) = 64
 
         # 2. POST /accounts/login/, for actual login
-        self.send_req(self.login_POST())
+        res2 = self.send_req(self.login_POST())
+        self.responseStatus(res2)
+
+
+
+    def responseStatus(self, response):
+        into_lines = response.split('\n')
+        first_line = into_lines[0].split(" ")
+        status = first_line[1]
+
+
+        if status[0] == "2":
+            print("status is 2XX. Everything is OK.\n")
+            
+
+        if status[0] == "3":
+            print("status is 3XX. HTTP redirect. \n")
+
+            sid_i = response.index("sessionid=") + 10
+            self.sessionid = response[sid_i:sid_i + 32]  # len(sessionid) = 32
+
+            tok_i = response.index("csrftoken=") + 10
+            self.csrftoken = response[tok_i:tok_i + 64]  # len(sessionid) = 64
+
+            self.refreshSocket()
+
+
+            new_request = self.handleRedirects(response)
+            self.responseStatus(self.send_req(new_request))
+
+
+        if status[0] == "4":
+            print("status is 4XX. Forbidden or Not Found. Abandon the url.\n")
+
+        if status[0] == "5":
+            print("status is 5XX. Service unavailable. Resend request.\n")
+
+
+    def refreshSocket(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        contextInstance = ssl.SSLContext()
+        self.sock = contextInstance.wrap_socket(s)
+        self.sock.connect((self.server, self.port))
+
+
+
+    def handleRedirects(self, response):
+        response_into_lines = response.split('\r\n')
+        location_line = response_into_lines[6]
+        location = location_line.split(' ')[1]
+
+        new_request = self.createRequest("GET", location)
+        return new_request
+
+
+    def createRequest(self, request_type, location):
+
+        initial = request_type + " " + location + " " + "HTTP/1.0"
+        keepalive = "Connection: close"
+        cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
+
+        return initial + "\r\n" + cookie + "\r\n" + keepalive + "\r\n\r\n"
+
+
+
 
     def fakebook_GET(self):
         initial = "GET /fakebook/ HTTP/1.0"
@@ -131,6 +198,7 @@ class Crawler:
         # try to get /fakebook now that im logged in...
         #print("\n\n\n\n GETTING FB")
         #self.send_req(self.fakebook_GET())
+
         
         self.sock.close()
        
