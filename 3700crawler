@@ -10,6 +10,7 @@ DEFAULT_PORT = 443
 USERNAME = "hughes.ca"
 PASSWORD = "001081764"
 
+
 # kosowski.e 001360844
 
 def my_recv(s: socket):
@@ -26,7 +27,7 @@ def my_recv(s: socket):
     
 class Parser(HTMLParser):
     # record of paths weve discovered
-    links_found = ['/'] 
+    links_found = ['/']
 
     # attrs is a list of tuples
     def handle_starttag(self, tag, attrs):
@@ -107,19 +108,29 @@ class Crawler:
 
         # 2. POST /accounts/login/, for actual login
         res2 = self.send_req(self.login_POST())
+
         self.responseStatus(res2)
 
 
+
+    def pickLink(self):
+        links_to_search = set(self.parser.links_found) - set(self.links_crawled)
+        links_to_search.remove("/accounts/logout/")
+        return links_to_search.pop()
 
     def responseStatus(self, response):
         into_lines = response.split('\n')
         first_line = into_lines[0].split(" ")
         status = first_line[1]
 
+        self.refreshSocket()
 
         if status[0] == "2":
             print("status is 2XX. Everything is OK.\n")
-            
+            link = self.pickLink()
+            next_request = self.createRequest("GET", link)
+            self.links_crawled.append(link)
+            self.responseStatus(self.send_req(next_request))
 
         if status[0] == "3":
             print("status is 3XX. HTTP redirect. \n")
@@ -130,7 +141,6 @@ class Crawler:
             tok_i = response.index("csrftoken=") + 10
             self.csrftoken = response[tok_i:tok_i + 64]  # len(sessionid) = 64
 
-            self.refreshSocket()
 
 
             new_request = self.handleRedirects(response)
