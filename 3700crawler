@@ -28,6 +28,9 @@ def my_recv(s: socket):
 class Parser(HTMLParser):
     # record of paths weve discovered
     links_found = ['/']
+    flags_found = []
+    num = 0
+    recording = 0
 
     # attrs is a list of tuples
     def handle_starttag(self, tag, attrs):
@@ -43,6 +46,18 @@ class Parser(HTMLParser):
                 for tuple in attrs:
                     if tuple[0] == 'value':
                         Crawler.csrfmiddlewaretoken = tuple[1]
+        if (tag == 'h2'):
+                self.recording = 1
+
+    def handle_endtag(self, tag):
+        if (tag == "h2"):
+            self.recording -= 1
+
+    def handle_data(self, data):
+        if self.recording:
+            print("Data     :", data)
+            if data.startswith("FLAG"):
+                self.flags_found.append(data)
                             
 class Crawler:
     sock = None
@@ -53,6 +68,7 @@ class Crawler:
 
     # record of paths weve crawled (had successful GET request for)
     links_crawled = ['/']
+    current_link = ""
 
     def __init__(self, args):
         self.server = args.server
@@ -68,6 +84,7 @@ class Crawler:
         
     def get_response(self):
         try:
+
             res = my_recv(self.sock)
             print("RESPONSE:\n%s" % res)
             self.parser.feed(res)
@@ -111,47 +128,62 @@ class Crawler:
 
         self.responseStatus(res2)
 
+        print("FOUND FLAGS: ", self.parser.flags_found)
+        print("AMOUNT OF LINKS CRAWLED: ", len(self.links_crawled))
+
+
 
 
     def pickLink(self):
         links_to_search = set(self.parser.links_found) - set(self.links_crawled)
         links_to_search.remove("/accounts/logout/")
+        if len(links_to_search) == 0:
+            print("NO MORE LINKS TO SEARCH")
         return links_to_search.pop()
 
     def responseStatus(self, response):
-        into_lines = response.split('\n')
-        first_line = into_lines[0].split(" ")
-        status = first_line[1]
 
-        self.refreshSocket()
+        if response:
+            into_lines = response.split('\n')
+            first_line = into_lines[0].split(" ")
+            status = first_line[1]
 
-        if status[0] == "2":
-            print("status is 2XX. Everything is OK.\n")
-            link = self.pickLink()
-            next_request = self.createRequest("GET", link)
-            self.links_crawled.append(link)
-            self.responseStatus(self.send_req(next_request))
+            print("FOUND FLAGS: ", self.parser.flags_found)
 
-        if status[0] == "3":
-            print("status is 3XX. HTTP redirect. \n")
-
-            sid_i = response.index("sessionid=") + 10
-            self.sessionid = response[sid_i:sid_i + 32]  # len(sessionid) = 32
-
-            tok_i = response.index("csrftoken=") + 10
-            self.csrftoken = response[tok_i:tok_i + 64]  # len(sessionid) = 64
+            self.refreshSocket()
 
 
+            if status[0] == "2":
+                print("status is 2XX. Everything is OK.\n")
+                link = self.pickLink()
+                next_request = self.createRequest("GET", link)
+                self.links_crawled.append(link)
+                self.current_link = link;
+                self.responseStatus(self.send_req(next_request))
 
-            new_request = self.handleRedirects(response)
-            self.responseStatus(self.send_req(new_request))
+            if status[0] == "3":
+                print("status is 3XX. HTTP redirect. \n")
+
+                sid_i = response.index("sessionid=") + 10
+                self.sessionid = response[sid_i:sid_i + 32]  # len(sessionid) = 32
+
+                tok_i = response.index("csrftoken=") + 10
+                self.csrftoken = response[tok_i:tok_i + 64]  # len(sessionid) = 64
 
 
-        if status[0] == "4":
-            print("status is 4XX. Forbidden or Not Found. Abandon the url.\n")
 
-        if status[0] == "5":
-            print("status is 5XX. Service unavailable. Resend request.\n")
+                new_request = self.handleRedirects(response)
+                self.responseStatus(self.send_req(new_request))
+
+
+            if status[0] == "4":
+                print("status is 4XX. Forbidden or Not Found. Abandon the url.\n")
+
+            if status[0] == "5":
+                print("status is 5XX. Service unavailable. Resend request.\n")
+                next_request = self.createRequest("GET", self.current_link)
+                self.responseStatus(self.send_req(next_request))
+
 
 
     def refreshSocket(self):
@@ -163,10 +195,11 @@ class Crawler:
 
 
     def handleRedirects(self, response):
+
         response_into_lines = response.split('\r\n')
         location_line = response_into_lines[6]
         location = location_line.split(' ')[1]
-
+        self.current_link = location;
         new_request = self.createRequest("GET", location)
         return new_request
 
