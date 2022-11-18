@@ -63,30 +63,22 @@ class Crawler:
 
 
     def recv(self):
-        chunked = False
         buffer = ''
         while "</html>" not in buffer: 
             data = self.sock.recv(1024).decode('ascii')
             if not data:
                 break
             buffer += data
-            if ("chunked" in buffer):
-                chunked = True
-                # message body will end with "0"
-                # then possibly footers
-
         return buffer
 
 
     def send_req(self, request):
-        # print('\nMAKING REQUEST: \n%s' % request)
         self.sock.send(request.encode('ascii'))
         
 
     def get_response(self):
         try:
             res = self.recv()
-            # print("RESPONSE: \n%s" % res)
             self.parser.feed(res)
             self.parser.close()
             return res
@@ -120,6 +112,7 @@ class Crawler:
         self.csrftoken = response[tok_i : tok_i + CSRF_TOKEN_LEN]
 
 
+    # decide what next request to make based on the previous response
     def response_status(self, response: str):
         next_request = None
         if response != '':
@@ -147,7 +140,7 @@ class Crawler:
         
             return next_request
 
-
+    # pop the next path to crawl from the stack, based on paths weve found and not yet crawled
     def pick_link(self):
         links_to_search = set(self.parser.links_found) - set(self.links_crawled)
         links_to_search.remove("/accounts/logout/")
@@ -156,6 +149,7 @@ class Crawler:
         return links_to_search.pop()
 
 
+    # build request for a 3XX redirection
     def handle_redirects(self, response: str):
         res_to_lines = response.split('\r\n')
         path = res_to_lines[6].split(' ')[1]
@@ -163,6 +157,8 @@ class Crawler:
         return self.create_request("GET", path)
 
 
+    # given the type of request (GET or POST), the path within the fakebook domain,
+    # and an optional message body, build the request
     def create_request(self, request_type: str, path: str, close = False, body = ""):
         initial = "%s %s HTTP/1.1" % (request_type, path)
         keepalive = "Connection: close" if close else "Connection: keep-alive"
@@ -199,6 +195,8 @@ class Crawler:
 
         connected = True
         more_flags = True
+
+        # crawl until there are more flags to be found
         while more_flags:  
             try:  
                 self.send_req(self.next_req)
@@ -206,7 +204,7 @@ class Crawler:
                 self.next_req = self.response_status(res) 
                 if (len(self.parser.flags_found) == 5):
                     more_flags = False
-            except socket.error:  
+            except socket.error: # upon a send or recv error, create a new socket connection
                 print( "reconnecting" )  
                 connected = False  
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
