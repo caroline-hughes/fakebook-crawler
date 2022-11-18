@@ -13,17 +13,6 @@ PASSWORD = "001081764"
 
 # kosowski.e 001360844
 
-def my_recv(s: socket):
-    buffer = ''
-    try:
-        while "</html>" not in buffer: 
-            data = s.recv(1024).decode('ascii')
-            if not data:
-                break
-            buffer += data
-    except Exception as loopException:
-        print("Exception occurred in loop:", loopException)
-    return buffer
     
 class Parser(HTMLParser):
     # record of paths weve discovered
@@ -55,7 +44,7 @@ class Parser(HTMLParser):
 
     def handle_data(self, data):
         if self.recording:
-            print("Data     :", data)
+            # print("Data     :", data)
             if data.startswith("FLAG"):
                 self.flags_found.append(data)
                             
@@ -76,8 +65,19 @@ class Crawler:
         self.username = args.username
         self.password = args.password
 
+    def my_recv(self):
+        buffer = ''
+        try:
+            while "</html>" not in buffer: 
+                data = self.sock.recv(1024).decode('ascii')
+                if not data:
+                    break
+                buffer += data
+        except Exception as loopException:
+            print("Exception occurred in loop:", loopException)
+        return buffer
+
     def send_req(self, request):
-        # print("Request to %s:%d was:\n\n" % (self.server, self.port))
         print('\n\nMAKING REQ:\n%s' % request)
         self.sock.send(request.encode('ascii'))
         return self.get_response()
@@ -85,7 +85,7 @@ class Crawler:
     def get_response(self):
         try:
 
-            res = my_recv(self.sock)
+            res = self.my_recv()
             print("RESPONSE:\n%s" % res)
             self.parser.feed(res)
             self.parser.close()
@@ -95,18 +95,16 @@ class Crawler:
 
     def login_POST(self):
         if (self.sessionid is None or self.csrftoken is None or self.csrfmiddlewaretoken is None):
-            print('not POSTing, missing necessary login data')
+            print('cannot POST, missing necessary login data')
 
         initial = "POST /accounts/login/?next=/fakebook/ HTTP/1.0"
         body = "username=%s&password=%s&csrfmiddlewaretoken=%s&next=/fakebook/" % (self.username, self.password, self.csrfmiddlewaretoken)
 
         # headers
         c_length = "Content-Length: %d" % len(body)
-        #print('my c_length: ', c_length)
         c_type = "Content-Type: application/x-www-form-urlencoded"
         keepalive = "Connection: close"
         cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
-        #print('my cookie: ', cookie)
 
         return initial + "\r\n" + cookie + "\r\n" + c_length + "\r\n" + c_type + "\r\n" + keepalive + "\r\n\r\n" + body + "\r\n\r\n"
 
@@ -115,8 +113,6 @@ class Crawler:
         res = self.send_req("GET /accounts/login/ HTTP/1.0\r\nConnection: keep-alive\r\n\r\n")
         self.links_crawled.append('/accounts/login/')
 
-
-        # TODO: better way than .index
         sid_i = res.index("sessionid=") + 10
         self.sessionid = res[sid_i:sid_i + 32] # len(sessionid) = 32
 
@@ -124,12 +120,7 @@ class Crawler:
         self.csrftoken = res[tok_i:tok_i + 64] # len(sessionid) = 64
 
         # 2. POST /accounts/login/, for actual login
-        res2 = self.send_req(self.login_POST())
-
-        self.responseStatus(res2)
-
-        print("FOUND FLAGS: ", self.parser.flags_found)
-        print("AMOUNT OF LINKS CRAWLED: ", len(self.links_crawled))
+        return self.send_req(self.login_POST())
 
 
 
@@ -150,15 +141,13 @@ class Crawler:
 
             print("FOUND FLAGS: ", self.parser.flags_found)
 
-            self.refreshSocket()
-
 
             if status[0] == "2":
                 print("status is 2XX. Everything is OK.\n")
                 link = self.pickLink()
                 next_request = self.createRequest("GET", link)
                 self.links_crawled.append(link)
-                self.current_link = link;
+                self.current_link = link
                 self.responseStatus(self.send_req(next_request))
 
             if status[0] == "3":
@@ -169,8 +158,6 @@ class Crawler:
 
                 tok_i = response.index("csrftoken=") + 10
                 self.csrftoken = response[tok_i:tok_i + 64]  # len(sessionid) = 64
-
-
 
                 new_request = self.handleRedirects(response)
                 self.responseStatus(self.send_req(new_request))
@@ -185,21 +172,17 @@ class Crawler:
                 self.responseStatus(self.send_req(next_request))
 
 
-
     def refreshSocket(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         contextInstance = ssl.SSLContext()
         self.sock = contextInstance.wrap_socket(s)
         self.sock.connect((self.server, self.port))
 
-
-
     def handleRedirects(self, response):
-
         response_into_lines = response.split('\r\n')
         location_line = response_into_lines[6]
         location = location_line.split(' ')[1]
-        self.current_link = location;
+        self.current_link = location
         new_request = self.createRequest("GET", location)
         return new_request
 
@@ -207,20 +190,10 @@ class Crawler:
     def createRequest(self, request_type, location):
 
         initial = request_type + " " + location + " " + "HTTP/1.0"
-        keepalive = "Connection: close"
+        keepalive = "Connection: keep-alive"
         cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
 
         return initial + "\r\n" + cookie + "\r\n" + keepalive + "\r\n\r\n"
-
-
-
-
-    def fakebook_GET(self):
-        initial = "GET /fakebook/ HTTP/1.0"
-        keepalive = "Connection: close"
-        cookie = "Cookie: csrftoken=%s; sessionid=%s;" % (self.csrftoken, self.sessionid)
-
-        return  initial + "\r\n" + cookie + "\r\n" + keepalive + "\r\n\r\n"
 
     def run(self):
         # instantiate socket with tls for HTTPS
@@ -230,18 +203,14 @@ class Crawler:
         self.sock.connect((self.server, self.port))
         self.parser = Parser()
 
-        self.perform_login()
+        res = self.perform_login()
 
-        # print('paths found:')
-        # print(Parser.links_found)
+        self.refreshSocket()
 
-        # print('paths crawled:')
-        # print(self.links_crawled)
+        self.responseStatus(res) # start recursive crawl loop
 
-        # try to get /fakebook now that im logged in...
-        #print("\n\n\n\n GETTING FB")
-        #self.send_req(self.fakebook_GET())
-
+        print("FOUND FLAGS: ", self.parser.flags_found)
+        print("AMOUNT OF LINKS CRAWLED: ", len(self.links_crawled))
         
         self.sock.close()
        
