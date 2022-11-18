@@ -39,7 +39,7 @@ class Parser(HTMLParser):
         if self.recording:
             if data.startswith("FLAG"):
                 self.flags_found.append(data)
-                print(data) # print the flag
+                print(data[6:]) # print the flag
                             
 class Crawler:
     sock = None
